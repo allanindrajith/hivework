@@ -1,0 +1,316 @@
+# Hivework Ask: Read-Only Contextual Help & Next-Step Guidance
+
+*   **Author:** Hivework
+*   **Status:** Draft
+*   **Date:** 2026-11-13
+*   **Issue:** #175
+
+--------------------------------------------------------------------------------
+
+## Overview
+
+The **Hivework Ask Skill** (`/hive-ask <question>`) answers a user's question about
+Hivework and about where they are in the Hivework workflow. It checks which Hivework
+artifacts exist on disk (for example `concepts_brief.md`, `design_draft.md`,
+and review reports), reads the Hivework skill descriptions and the Hivework harness docs,
+and replies in chat with a short answer and at most three suggested next steps.
+
+The skill is advisory only. It does not write files, run other skills, or
+change the state of a skill that is in progress.
+
+Issue #175
+proposed the name `/ask-hivework`. The maintainers chose `/hive-ask` on that issue,
+so the command follows the `hive-` prefix that every other Hivework skill uses.
+
+## The Problem
+
+1.  **Blank Canvas**: New users have seen a demo of `/hive-brainstorm` or
+    `/hive-review` but do not know what to type to start, which skill fits their
+    task, or what input a skill expects.
+
+2.  **Lost After a Break**: The skills can be used in any order (see
+    [getting_started.md](../getting_started.md)). Within one session, each
+    skill already names the next step when it finishes: hive-brainstorm's
+    handoff offers `/hive-draft`, hive-draft recommends `hive-review`, and
+    hive-review's stage gates name the next stage. That handoff is gone in a new
+    session, or when the user returns to a project later. The user then sees
+    artifact files on disk but does not know which skill wrote them or which
+    one to run next.
+
+3.  **Unanchored Troubleshooting**: When something fails (a reviewer cannot read
+    its persona file, a skill is missing from autocomplete, a subagent tool is
+    unavailable), the documented fix is in [harnesses.md](../harnesses.md) or
+    the harness guide ([claude.md](../claude.md) or [codex.md](../codex.md)).
+    Hivework skills set `disable-model-invocation: true`, so they are absent from
+    automatic skill discovery (claude.md). In plain chat, the model therefore
+    does not see the Hivework skill descriptions or know which doc holds the fix.
+
+## Goals vs. Non-Goals
+
+### In-Scope Goals
+
+*   Add a user-invoked `/hive-ask <question>` skill.
+*   Detect the current workflow stage from artifacts on disk and suggest the
+    next skill to run, in the command form the user's harness expects.
+*   Recommend skills based on the user's stated intent, using the live
+    `description` field of each installed `skills/*/SKILL.md`, so new skills
+    appear in recommendations without editing `hive-ask`.
+*   Answer troubleshooting questions by citing the Hivework doc that holds the fix.
+
+### Out-of-Scope Non-Goals
+
+*   Running skills, spawning subagents, loading skills, or editing files. The
+    skill only reads files and replies in chat.
+*   Replacing normal prompts for task work. `/hive-ask` answers questions about
+    Hivework; it does not draft, review, or fix.
+*   Answering, resuming, or acting on another skill's pending approval step.
+*   General programming help unrelated to Hivework. For those questions the skill
+    says that it only covers Hivework and stops.
+*   Keeping its own state or memory between calls.
+*   Running shell commands such as `git status`. Stage detection uses artifact
+    files only.
+
+## System Architecture & Workflow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Ask as hive-ask Skill
+    participant Workspace as Working Directory / Hivework artifact directory
+    participant Plugin as Plugin root: skills/, docs/
+
+    User->>Ask: /hive-ask <question>
+    Ask->>Ask: Classify question (next step, skill choice, troubleshooting, out of scope)
+    Ask->>Workspace: List known Hivework artifact names (read-only)
+    Ask->>Plugin: Read stage table, skill descriptions, harness docs (read-only)
+    Ask->>Ask: Detect workflow stage and compose answer
+    Ask->>User: Short answer + up to 3 next steps (harness command form)
+```
+
+### Where the Skill Reads From
+
+`skills/hive-ask/SKILL.md` opens with the same two-line harness preamble as the
+other Hivework skills: in Claude Code or Cowork it reads `docs/claude.md`, and in
+Codex or ChatGPT Work it reads `docs/codex.md`. That preamble fixes two
+things:
+
+*   **Paths.** `docs/` and `skills/` paths in this design resolve against the
+    installed plugin root, never against the user's project, which may have
+    folders with the same names. Artifacts and `docs/designs/` resolve against
+    the user's workspace.
+*   **Harness guide.** The guide the preamble names is "the harness guide"
+    used below. A harness with no guide (for example Antigravity or omp) uses
+    [harnesses.md](../harnesses.md) only.
+
+### Step 1: Classify the Question
+
+The skill sorts the question into one of four types. The type decides which
+files to read, so the skill does not read every doc for every question.
+
+| Type | Example | Files read |
+| :--- | :------ | :--------- |
+| **Next step** | "What do I do now?" | Artifact names in the workspace and the stage table (Step 2) |
+| **Skill choice** | "Which skill checks my README against code?" Also Hivework task requests such as "Fix my draft": name the skill that does the work and make no edits. | `skills/*/SKILL.md` frontmatter only |
+| **Troubleshooting** | "The reviewer says it cannot read its persona." | `docs/harnesses.md` and the harness guide |
+| **Out of scope** | "How do I fix this TypeScript error?" | None. Reply that `/hive-ask` only covers Hivework. |
+
+If the user gives no question, the skill treats it as a **Next step** question.
+
+### Step 2: Detect the Workflow Stage
+
+The skill looks for Hivework artifacts in the same places, and in the same order, as
+hive-draft's intake (hive-draft Step 1): the working directory, the harness's
+artifact directory (see [harnesses.md](../harnesses.md), "Artifact
+Directory"), then `scratch/`. An `Hivework artifact directory: <path>` line in the
+user's prompt or agent instructions file replaces the working directory, as
+claude.md describes.
+
+The skill checks for files by name. The only file content it reads from the
+workspace is the first lines of `hivework_review_report.md`: the
+`Status: resolved` line and the `**Target:**` line. It suggests the step after
+resolution only when that target is the design the user means.
+
+File presence is a stage hint, not evidence that a workflow completed. A review
+report may be partial or left over from an earlier run. If the files do not
+establish the stage for the current target, the skill reports the stage as
+unknown, lists the artifacts it saw, and asks the user which run or target they
+mean.
+
+The stage table below lists which skill writes each artifact. Its canonical
+copy lives in a "What to run next" section of
+[getting_started.md](../getting_started.md), added by the implementation PR,
+and `/hive-ask` reads it from there at runtime. People reading the docs see the
+same table, and a renamed artifact is updated in one place.
+
+| Artifacts found (written by) | Detected stage | Suggested next step |
+| :--------------------------- | :------------- | :------------------ |
+| None, and no `docs/designs/*.md` | Not started | `hive-brainstorm` for a new idea, or `hive-bootstrap` to document an existing codebase |
+| `concepts_brief.md` (hive-brainstorm) | Ideation done | `hive-draft`, which reads `concepts_brief.md` as its first input |
+| `design_draft.md` (hive-draft), no matching `docs/designs/<feature>.md` | Draft in progress | Continue `hive-draft` until it writes `docs/designs/<feature>.md` |
+| `docs/designs/<feature>.md`, no review reports | Ready for review | `hive-review docs/designs/<feature>.md` |
+| `zoom_out_report.md`, `comprehension_report.md`, `critic_report.md`, `intermediate_zoom_out_report.md`, `implementation_readiness_report.md`, or `consolidated_review_report.md` (hive-review) | Review started; completion unknown | Ask whether the review of this target finished. If it did, `hive-resolve` on its findings. If not, continue the pending review |
+| `hivework_review_report.md` (hive-resolve) without `Status: resolved` | Resolution in progress | Return to the resolve step that is waiting for an answer, or run `hive-resolve` again |
+| `hivework_review_report.md` with `Status: resolved` | Findings resolved | Human review of the design (getting_started.md, step 4); implement only after the checks below pass |
+
+**Before suggesting implementation.** A checked-in design or a resolved report
+alone does not justify implementing. The skill suggests implementation only
+when all of these hold:
+
+1.  **Target is known.** The user named the design, or the `**Target:**` line
+    of the resolved report names exactly one `docs/designs/<feature>.md` and
+    the user confirms it. If several designs could match, the skill asks which
+    one the user means.
+2.  **No review is pending for that target.** If review reports exist, the
+    user confirms that the review finished, and no review or resolve step in
+    the recent conversation is waiting for an answer.
+3.  **No approval is pending.** The skill cannot see human approval of a
+    design, so it asks whether the design was approved. Until the user
+    confirms, it suggests the human review step instead of implementation.
+
+If any check fails, the skill suggests the pending step instead. It does not
+answer or resume that step itself (see Rules).
+
+The rows are in workflow order. When several rows match, the skill names the
+latest matching stage and lists every artifact it saw, so the user can correct
+it. If the user's question names a different goal, that goal overrides the
+table.
+
+### Step 3: Compose the Answer
+
+The reply is plain English and follows this shape:
+
+```markdown
+**Where you are:** <one sentence, naming the artifacts seen>
+**Answer:** <2-6 sentences>
+**Next steps:**
+1. `<command>`: <why>
+2. ...
+**Source:** <relative path of each doc or SKILL.md used>
+```
+
+*   At most three next steps and at most 20 lines in total. Hivework's
+    artifact-first principle (see [architecture.md](architecture.md)) keeps
+    long output out of chat; a help answer that needs more space points to the
+    doc that already holds it.
+*   Commands use the form the harness guide gives, for example
+    `/hive-draft` in Claude Code. With no harness guide, the skill shows the
+    bare command and repeats the README note on prefixes.
+*   Every Hivework command shown must belong to an installed skill. Host commands
+    and settings (for example `claude plugin enable hivework@hivework`) may appear only
+    when quoted from a cited doc. The skill must not invent commands or flags.
+*   If the docs do not cover a troubleshooting question, the skill says so and
+    suggests opening an issue, instead of guessing.
+
+### Rules: Pending Gates and Read-Only
+
+**Pending gates.** A user may run `/hive-ask` while another skill waits for an
+answer, for example at hive-resolve's resolution gate. That gate accepts free
+text, including custom instructions. `/hive-ask` does not answer, resume, or
+act on the pending gate. Its read-only rules end with its reply. The user
+answers the pending gate directly.
+
+**Read-only.** The skill runs in the main conversation because next-step and
+troubleshooting answers depend on the user's recent turns and the error text
+they just saw. A fresh-context Hivework reviewer (see
+[architecture.md](architecture.md)) would not see either. In Claude Code, Hivework
+skills run in the main context, and only subagent adapters get restricted tool
+lists (claude.md). The read-only rule is therefore enforced by the skill's
+instructions and by behavioral test scenarios (see Testing). The skill sets
+`disable-model-invocation: true`, like the other Hivework skills, so it only runs
+when the user asks for it.
+
+## Alternatives Considered
+
+| Alternative | Reason rejected |
+| :---------- | :-------------- |
+| **Ask in plain chat (no new skill)** | Works today, but Hivework skills are absent from automatic skill discovery, so the model does not see their descriptions, artifact names, or stage order unless they are already in the conversation. |
+| **Improve the existing skill handoffs** | Worth doing as follow-up: hive-brainstorm and hive-draft print their next command without the harness prefix. It does not help a new session, skill choice, or troubleshooting, which are the cases this design targets. |
+| **Read-only subagent answers the question** | Enforces read-only with tools, but next-step and troubleshooting answers need the user's recent turns and error text. Routing only some question types to a subagent adds a second execution path and a new adapter in each harness, a large cost for a 20-line reply. |
+| **"What to run next" section in the docs only** | Adopted as the data source (Step 2), but a static section cannot see which artifacts the user has. |
+| **Write the answer to an artifact file** | Help answers are short. A file per question adds clutter, and the user has to open it. |
+| **Model-invocable skill** | The model would trigger it on any "how do I" message, which collides with regular task prompts (a stated non-goal). |
+| **Name it `/ask-hivework` as in the issue** | The maintainers chose `/hive-ask` on #175. It matches the `hive-` prefix of every current skill. |
+
+## Risks & Mitigations
+
+*   **Wrong stage detected.** File presence can mislead, for example a leftover
+    report from an earlier run. Mitigation: the skill treats files as hints,
+    lists every artifact it saw, and reports an unknown stage instead of
+    guessing (Step 2).
+*   **Stage table drifts from the skills.** Mitigation: one canonical table in
+    getting_started.md, with the writing skill named on each row.
+*   **Read-only enforced by instructions only.** Mitigation: behavioral
+    scenarios 6, 7, and 8 check that the skill makes no edits and picks no
+    gate option.
+*   **Instructions planted in workspace files.** Text inside a review report
+    could be read as instructions while write tools are present. Mitigation:
+    from the workspace, the skill reads only file names and the `Status:` and
+    `**Target:**` lines of one report.
+    All prose it reads comes from plugin-owned docs and frontmatter.
+*   **Context cost in the main thread.** Mitigation: each question type reads
+    only its listed files, and the answer is capped at 20 lines.
+
+## Implementation Files & Referenced Components
+
+### Files Changed by the Implementation PR
+
+| Path | Create/Modify | Change |
+| :--- | :------------ | :----- |
+| `skills/hive-ask/SKILL.md` | Create | Harness preamble, the four question types, stage detection, answer shape, and the pending-gate and read-only rules. The body must stay under the 24,000-byte limit checked by `tests/unit/test_skill_load_limits.py`. |
+| `skills/hive-ask/TEST.md` | Create | Manual verification steps for each question type and stage. |
+| `skills/hive-ask/test_scenarios.yaml` | Create | Behavioral scenarios from Testing below. |
+| `skills/hive-ask/agents/openai.yaml` | Create | Display name and icon metadata, matching the other skills. |
+| `skills/hive-ask/assets/icon.svg` | Create | Skill icon following [skill_icons.md](skill_icons.md). |
+| `docs/getting_started.md` | Modify | Add the "What to run next" stage table and a `/hive-ask` entry. |
+| `scripts/pack_plugin.py` | Modify | Add `hive-ask` to the skill list. |
+| `tests/unit/test_harnesses.py` | Modify | Add `hive-ask` to `EXPECTED_SKILLS`. |
+| `tests/unit/test_packaging.py` | Modify | Add `skills/hive-ask/SKILL.md` to the expected packaged files. |
+| `distributions/claude/` | Modify | Regenerate with `scripts/pack_plugin.py`. |
+| `README.md` | Modify | List `/hive-ask` with the other commands. |
+| `docs/designs/architecture.md` | Modify | Add `hive-ask` to the Skills Layer list. |
+| `docs/designs/skill_icons.md` | Modify | Update the skill count. |
+| `site/src/components/Skills.astro`, `site/src/components/SkillIcon.astro` | Modify | Add the skill card and icon. |
+
+### Referenced Docs (Read at Runtime)
+
+*   [getting_started.md](../getting_started.md): the "What to run next" stage
+    table.
+*   [harnesses.md](../harnesses.md), [claude.md](../claude.md),
+    [codex.md](../codex.md): troubleshooting and command forms.
+*   `skills/*/SKILL.md` frontmatter: skill names and descriptions for
+    recommendations.
+
+## Testing
+
+`skills/hive-ask/test_scenarios.yaml` uses the same scenario format as the other
+skills' suites and covers at least:
+
+1.  Empty workspace, no question: suggests `hive-brainstorm` or `hive-bootstrap`.
+2.  Only `concepts_brief.md` present: suggests `hive-draft`.
+3.  Review reports present for the current target: asks whether that review
+    finished before suggesting `hive-resolve`, and does not bypass a pending gate.
+4.  `critic_report.md` present and the user says the review did not finish:
+    suggests continuing `hive-review`, not starting it again.
+5.  `concepts_brief.md` and `docs/designs/x.md` both present: names the latest
+    stage and lists both files.
+6.  "Please fix my draft for me": makes no edits and names the skill that does
+    that work.
+7.  Unrelated programming question: replies that it only covers Hivework.
+8.  Called while an `hive-resolve` gate is pending: answers the question, makes
+    no edits, and picks no gate option.
+9.  "Which skill compares my designs with code?": recommends
+    `hive-drift-report` and cites its `SKILL.md`.
+10. Persona-read failure: cites `docs/claude.md`.
+11. Resolved report and two checked-in designs, and the user names neither:
+    asks the user to confirm the design (the report's `**Target:**`, or which
+    one if that is unclear) and whether it was approved; does not suggest
+    implementation.
+
+Static checks: `pytest tests/unit` (frontmatter, scenario coverage, skill body
+size limit, packaging, and link integrity).
+
+## References
+
+*   Issue #175:
+    Add /ask-hivework command for contextual help and guidance.

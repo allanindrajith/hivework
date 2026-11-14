@@ -1,0 +1,199 @@
+# Hivework Architecture & System Lifecycle
+
+*   **Authors:** Hivework
+*   **Status:** Current
+*   **Date:** 2026-11-13
+
+--------------------------------------------------------------------------------
+
+## Overview
+
+The **Hivework Review Model** is an implementation of Spec-Driven
+Development (SDD) based on the Hivework review method.
+It emphasizes collaborative use of AI for design and review, maintaining verified
+technical specifications checked directly into the codebase.
+
+This document specifies the overarching system architecture of Hivework: its
+component model, its end-to-end dataflow, and its lifecycle across coding agent
+runtimes.
+
+## The Problem
+
+Unstructured, conversational AI code generation suffers from four systemic
+failure modes:
+
+1.  **Hallucination Cascades & Context Pollution**: When a single LLM thread
+    interviews the developer, creates the design, and writes the code, the
+    session context accumulates speculative hypotheses and conversational bias.
+    The model validates its own faulty assumptions instead of detecting errors.
+2.  **Premature Implementation ("Weeds Syndrome")**: Coding agents default to
+    writing code immediately in nearby files, bypassing high-level architectural
+    placement, simplicity checks (YAGNI), and existing infrastructure reuse.
+3.  **Chat Dump Fatigue**: Presenting multi-page design specs or lengthy review
+    feedback directly in chat windows clutters conversation history, degrades
+    LLM context performance, and creates poor user ergonomics.
+4.  **Documentation Drift**: Design documents written during project kickoff
+    routinely rot as code evolves, breaking future AI agent onboarding.
+
+## Design Principles
+
+*   **The Elephant & The Hivework Reviewers**:
+
+    *   **The Elephant**: A deep-context agent loaded with system history, CUJs,
+        and codebase maps to explore requirements and draft designs.
+    *   **The Hivework Reviewers**: Isolated, zero-context subagent reviewers evaluating
+        drafts against rubrics without access to context bias.
+
+*   **Human Ownership**: AI is a tool for exploration and review; the human
+    engineer is responsible for architectural decisions, trade-offs, and owns
+    the outcome.
+
+*   **Artifact-First UX**: All long-form deliverables (drafts, summaries, review
+    reports) are rendered into dedicated side-panel markdown artifacts or
+    workspace files with interactive feedback checkpoints.
+
+*   **Living Specifications**: Designs are checked-in artifacts in the source
+    tree (`docs/designs/`), continuously monitored against codebase drift.
+
+## System Architecture & Component Model
+
+The open-source Hivework framework is organized into four decoupled subsystems:
+
+### 1. Skills Layer (`skills/`)
+Modular agent capabilities executable via slash commands or direct invocation:
+*   `hive-brainstorm`: 7-lens shootdown swarm for early concept exploration.
+*   `hive-draft`: Section-by-section specification compiler.
+*   `hive-review`: Orchestrator for the multi-stage review pipeline.
+*   `hive-review-loop`: Concurrent subagent review dispatcher.
+*   `hive-resolve`: Interactive resolution and patch application.
+*   `hive-drift-report`: Agent workflow comparing specs and READMEs to code via host search and file-reading tools.
+*   `hive-bootstrap`: Recursive bottom-up codebase documentation generator.
+
+### 2. Personas Layer (`agents/`)
+Stateless system prompt instructions for isolated Hivework reviewer subagents
+(Comprehension, Design Critic, Implementation Readiness, Codebase Auditor,
+Structural Validator, Style Editor, Inventive Catalyst, and Synthesizer).
+
+### 3. Document Standards (`resources/document_standards/`)
+Hivework reviewers load the versioned rubrics listed in the
+[shared runtime resources](../../resources/README.md). Those files own the
+evaluation requirements; this design describes how the layers use them.
+
+### 4. Living Documentation (`docs/`)
+User guides (`getting_started.md`, `faq.md`) and technical design specifications
+(`docs/designs/`).
+
+## End-to-End Lifecycle & Dataflow
+
+The Hivework development pipeline transitions artifacts through five disciplined
+phases:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Human as Software Engineer
+    participant Elephant as Elephant (Brainstorm & Draft)
+    participant Artifact as Side-Panel Artifact / File
+    participant Reviewer as Hivework Reviewers (Synthesizer)
+    participant VCS as Version Control (PR)
+    participant Coder as Implementation Agent
+
+    Human->>Elephant: /hive-brainstorm (Multi-Lens Ideation & Shootdown)
+    Elephant->>Artifact: Write concepts_brief.md
+    Human->>Elephant: /hive-draft
+    Elephant->>Artifact: Write docs/designs/FEATURE.md
+    Human->>Reviewer: /hive-review docs/designs/FEATURE.md
+    Note over Reviewer: Zoom Out -> Comprehension -> Critic -> Zoom Out -> Readiness
+    Reviewer->>Artifact: Write review reports & findings
+    Human->>Reviewer: Triage & resolve findings (/hive-resolve)
+    Human->>VCS: Open Pull Request with FEATURE.md
+    VCS-->>Human: Spec Approved & Merged
+    Human->>Coder: Implement against FEATURE.md
+```
+
+### Phase 1: Upstream Ideation & Multi-Lens Shootdown (The Elephant)
+
+*   **Command**: `/hive-brainstorm`
+*   **Mechanics**: The Elephant interviews the engineer to anchor a core hypothesis,
+    then spawns a 7-lens Hivework review swarm to shoot down flawed assumptions.
+*   **Output**: A structured brief written to `concepts_brief.md`.
+
+### Phase 2: Spec Authoring & Semantic Boundaries
+
+*   **Command**: `/hive-draft`
+*   **Mechanics**: Converts the concepts brief (or discussion notes) into a Hivework-compliant
+    technical design document written to `docs/designs/<feature>.md`.
+*   **Semantic Boundary Discovery**: Establishes a clear boundary between the
+    high-level architecture (`FeatureRange`) and the detailed implementation
+    plan (`DetailedRange`), enabling targeted subagent reviews.
+
+### Phase 3: Isolated Verification (The Hivework Reviewers)
+
+*   **Command**: `/hive-review`
+*   **Execution**: Executes a five-stage evaluation pipeline:
+    1.  **Step 5: Zoom Out Review**: Evaluates simplicity, YAGNI, and codebase
+        reuse against `zoom-out-standard.md`.
+    2.  **Step 6: Comprehension Test**: Isolated naive reader audits the doc for
+        self-containment and missing background knowledge.
+    3.  **Step 7: Critic Review**: Evaluates system design, scale bottlenecks,
+        and failure modes against `feature-spec-standard.md`.
+    4.  **Step 8: Intermediate Zoom Out**: Re-audits additions made during the
+        Comprehension and Critic stages against `zoom-out-standard.md`.
+    5.  **Step 9: Implementation Readiness Test**: Verifies file paths, function
+        signatures, and test cases against
+        `implementation-readiness-standard.md`.
+*   **Subagent Fan-Out/Fan-In**: The `synthesizer` persona spawns isolated
+    reviewers in parallel, aggregates raw findings, deduplicates overlaps, and
+    writes consolidated markdown reports.
+
+### Phase 4: Human Review & Submission
+
+*   The human engineer resolves or rejects Hivework Reviewer findings using
+    `/hive-resolve`, updates the design doc, and submits the
+    specification via Pull Request for human peer review.
+
+### Phase 5: Implementation & Drift Monitoring
+
+*   **Execution**: Coding agents implement code strictly adhering to the
+    approved design document. (No Skill.md is required here because the design 
+    document is complete and detailed.)
+*   **Phase Write Boundaries**: Phases 1-4 (`/hive-brainstorm`, `/hive-draft`,
+    `/hive-review`, and `/hive-resolve`) should write only specification and
+    review artifacts: `concepts_brief.md`, `design_draft.md`, the review
+    reports, the design doc, and `SITEMAP.md` if it exists. They should not
+    change production source code or dependencies. This is a convention, and
+    nothing enforces it. Once Step 9 (Implementation Readiness Test) passes,
+    the plan's `Target Scope & File Boundary` list is the set of files Phase 5
+    implementation may write.
+*   **Maintenance**: `/hive-drift-report` is run periodically (e.g. weekly) to
+    detect divergence between codebase implementations and checked-in design docs.
+
+## Artifact-First UX Protocol
+
+To maintain conversation health and prevent context degradation, all Hivework skills
+adhere to the following UX protocol:
+
+1.  **Chat Dump Prohibition**: Tools and skills must never dump large proposals,
+    drafts, or review logs into the main chat stream.
+2.  **Artifact Emission**: All content must be written directly to dedicated
+    side-panel artifacts (with `RequestFeedback: true` in Antigravity) or to
+    persistent workspace files.
+3.  **Turn-Yielding Checkpoints**: When user feedback or triage is required, the
+    calling skill notifies the user with a concise message pointing to the
+    artifact and yields execution.
+4.  **Queue Clearance**: Once the user completes a checkpoint review, the
+    calling skill clears pending feedback markers.
+
+
+## Alternatives Considered
+
+*   **Monolithic In-Thread Review vs. Multi-Subagent Pipeline**:
+    *   *Alternative*: Run review prompts sequentially within the same chat
+        session.
+    *   *Rejection*: Severe context degradation and confirmation bias; the model
+        validates its own mistakes.
+*   **Direct-to-Code vs. Spec-Driven Development**:
+    *   *Alternative*: Prompting agents to generate code directly from feature
+        requests.
+    *   *Rejection*: Results in higher comment density per kLOC, duplicated
+        utility implementations, and zero checked-in architectural memory.

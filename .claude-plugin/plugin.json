@@ -1,0 +1,10 @@
+{
+  "name": "hivework",
+  "version": "1.0.0",
+  "description": "Hivework review skills, reviewer personas, and engineering skills: multi-agent design review, drafting, drift reports, security review, TDD, and more.",
+  "author": { "name": "Hivework Contributors" },
+  "homepage": "https://github.com/allanindrajith/hivework",
+  "repository": "https://github.com/allanindrajith/hivework",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": ["hivework", "review", "skills", "agents"]
+}

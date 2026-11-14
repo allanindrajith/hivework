@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hive Analysis Optimization"
+  short_description: "Optimize analysis with preserved Evidence and measured costs"
+  default_prompt: "Use $hive-analysis-optimization to find and verify a concrete analysis bottleneck while preserving correctness and Evidence."

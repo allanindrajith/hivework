@@ -1,0 +1,16 @@
+{
+  "name": "hivework",
+  "owner": { "name": "Hivework Contributors" },
+  "metadata": {
+    "description": "Hivework skills and reviewer personas for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "hivework",
+      "source": "./",
+      "description": "Hivework review skills, reviewer personas, and engineering skills.",
+      "version": "1.0.0",
+      "license": "PolyForm-Noncommercial-1.0.0"
+    }
+  ]
+}

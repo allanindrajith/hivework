@@ -1,0 +1,18 @@
+# Copyright 2026 Hivework Contributors
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+skill: "hive-drift-report"
+description: "Behavioral evaluation scenario suite for hive-drift-report skill."
+
+scenarios:
+  - scenario_id: "detect_all_drift"
+    description: "Compares implemented code against design specs; verifies all documentation and implementation discrepancies are identified."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/hive-drift-report/SKILL.md"
+    turns:
+      - user_input: "Run hive-drift-report on `docs/designs/drift_report.md` against implemented source files."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(drift|discrepancy|matches|out of sync|report)"
+            message: "Drift report must evaluate alignment between design documents and source code."
